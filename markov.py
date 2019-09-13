@@ -9,9 +9,6 @@ import sys, io, random, statistics
 class DiscrDistr:
 
 	def __init__(self):
-		self.Clear()
-
-	def Clear(self):
 		self.m, self.cdf = {}, None
 
 	def Increment(self, key, counts=1):
@@ -41,7 +38,6 @@ class DiscrDistr:
 
 #
 # Markov generator for token sequences.
-# Don't call GetNextToken() until you've added all your data!
 #
 
 class Markov:
@@ -58,12 +54,10 @@ class Markov:
 	def GetNextToken(self, state):
 		return random.choice(self.transitions[state])
 
-	def StateExists(self, state):
-		return (state in self.transitions)
-
 
 #
 # As above, using DiscrDist for reduced memory (but may be slower).
+# Don't call GetNextToken() until you've added all your data!
 #
 
 class MarkovDD:
@@ -80,9 +74,6 @@ class MarkovDD:
 	def GetNextToken(self, state):
 		return self.transitions[state].Sample(random.random())
 
-	def StateExists(self, state):
-		return (state in self.transitions)
-
 
 #
 # Print some usage information
@@ -90,7 +81,7 @@ class MarkovDD:
 
 def print_usage(prog):
 	print()
-	print('Usage: %s input.txt tuple_len [min_sentence]' % (sys.argv[0]))
+	print(f'Usage: {prog} input.txt tuple_len [min_sentence]')
 	print()
 	print('Where:')
 	print()
@@ -120,7 +111,7 @@ markov = MarkovDD() if use_counts else Markov()
 
 args = sys.argv
 
-if len(args) < 2:
+if len(args)<2:
 	print_usage(args[0])
 
 path = args[1]
@@ -172,14 +163,11 @@ for old in replace:
 # Break input text into sentences, tokenise, and generate state transitions
 #
 
-sentences = txt.split(split_marker)
-
-for sentence in sentences:
+for sentence in txt.split(split_marker):
 	toks = sentence.split()
 	n_toks = len(toks)
 
-	if n_toks < min_sentence_len:
-		continue
+	if n_toks < min_sentence_len: continue
 
 	for tok in toks:
 		unique_toks[tok] = unique_toks.setdefault(tok,0)+1
@@ -198,6 +186,9 @@ for sentence in sentences:
 
 		markov.AddTransition(state, next_token)
 
+# We'll seed the generation using random known-good start states with at least 2 potential transitions.
+good_start_states = [ s for s in list(starts.keys()) if markov.CountTransitions(s)>1 ]
+
 #
 # Print some information for the user
 #
@@ -208,8 +199,8 @@ stuff = sorted(stuff, key=lambda x: x[1], reverse=True)
 
 print()
 
-print('%d unique tokens.'%(len(stuff)))
-#for s in stuff: print( ' %10s %d' % (utf8(s[0]), s[1]) )
+print(f'{len(stuff)} unique tokens.')
+#for s in stuff: print( ' %10s {s[1]}' % (utf8(s[0])) )
 
 print('%d viable sentences; min. length %.0f, max. %.0f, mean %.1f, median %.1f, stdev %.1f'%(
 	len(seq_lens),
@@ -220,33 +211,25 @@ print('%d viable sentences; min. length %.0f, max. %.0f, mean %.1f, median %.1f,
 	statistics.stdev(seq_lens)
 	))
 
-print('%d transitions.'%(len(markov.transitions)))
-#for k in transitions: print('%s,%s => '%(utf8(k[0]),utf8(k[1])), transitions[k])
-
-print('%d start tuples.'%(len(starts)))
-print('%d end tokens.'%(len(ends)))
+print(f'{len(markov.transitions)} transitions.')
+print(f'{len(starts)} start tuples, {len(good_start_states)} good for seeding.')
+print(f'{len(ends)} end tokens.')
 
 print()
 
 #
-# Generate some sentences using Markov chain
-# TODO: examine potential paths through graph, bias towards parhs with greatest combinatorial variation?
+# Generate some sentences using Markov process
+# TODO: examine potential paths through graph, bias towards paths with greatest combinatorial variation?
 # Straightforward to implement via modified Dijkstra's algorithm.
 #
 
-# Seed with random known-good start state with >1 potential transition.
-start_states = list(starts.keys())
-start_states = [ s for s in start_states if markov.CountTransitions(s)>0 ]
-
-if len(start_states)<1:
-	print('No suitable start states found for state tuple size of %d!' % (state_tuple_len))
+if len(good_start_states)<1:
+	print('No start states suitable to seed generation!')
 	sys.exit(-1)
 
-seed_state = random.choice(start_states)
-while markov.CountTransitions(seed_state)<2:
-	seed_state = random.choice(start_states)
+seed_state = random.choice(good_start_states)
 
-print('Seed: "%s" (max_attempts = %d):'%(' '.join(seed_state), max_attempts))
+print(f'Seed: "{" ".join(seed_state)}" (max_attempts = {max_attempts}):')
 print()
 
 # Attempt to generate multiple unqiue sentences from the same seed.
@@ -263,8 +246,7 @@ while (len(previous)<10) and (n_attempts<max_attempts):
 
 	while True:
 		# No valid transition from this state.
-		if markov.StateExists(state) == False:
-			break
+		if state not in markov.transitions: break
 
 		next_tok = markov.GetNextToken(state)
 
@@ -272,24 +254,19 @@ while (len(previous)<10) and (n_attempts<max_attempts):
 		state = ( *state[1:], next_tok )
 
 		# Sentence is "long enough", and terminates with a known end token.
-		if (len(sequence)>L) and (next_tok in ends):
-			break
+		if (len(sequence)>L) and (next_tok in ends): break
 
 	# Did we end unexpectedly? Tag output so the user knows.
 	tag = (len(sequence)<L) or (next_tok not in ends)
 	
 	# Convert token list to a string, and ensure we're not repeating ourselves
 	sentence = ' '.join(sequence)
-	if sentence in previous:
-		continue
-	else:
-		previous[sentence] = True
+	if sentence in previous: continue
+	else: previous[sentence] = True
 
 	# Make output look a little nicer
-	for x in replace:
-		sentence = sentence.replace(' '+x,x)
+	for x in replace: sentence = sentence.replace(' '+x,x)
 	sentence = sentence[0].upper() + sentence[1:]
 	
-	print('%d %1.1s "%s"'%(len(previous), '*' if tag else ' ', sentence))
+	print(f'{len(previous)} {"*" if tag else " "} "{sentence}"')
 	print()
-
